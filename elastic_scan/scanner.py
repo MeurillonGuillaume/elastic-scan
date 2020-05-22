@@ -1,4 +1,5 @@
 import logging
+import socket
 from dask import delayed,  bag as db
 from elasticsearch import Elasticsearch
 
@@ -85,8 +86,7 @@ def __scan(index, client, auth=('', ''), query={}, scroll_size=10000, timeout='1
     :rtype: list
     """
     # Connect to Elasticsearch
-    _es = Elasticsearch(hosts=client, http_auth=auth)
-    return list(__elastic_scanner(index, client, query=query, scroll_size=scroll_size, timeout='1m', responsetype=responsetype))
+    return list(__elastic_scanner(index, client, auth=auth, query=query, scroll_size=scroll_size, timeout='1m', responsetype=responsetype))
 
 
 def __add_slice(query, sliceid, slicemax):
@@ -111,7 +111,51 @@ def __add_slice(query, sliceid, slicemax):
     return query
 
 
-def scan_index(index, client, auth=('', ''), query={}, scroll_size=10000, n_partitions=None, timeout='1m', responsetype=HITS, use_https=True):
+def __get_shard_info(index, client, auth=('', '')):
+    """
+    Request info about the shards used for an index or alias
+
+    :param index: The name of the index or alias
+    :type index: str
+
+    :param client: The endpoint to request info from
+    :type client: str, list
+
+    :rtype: list
+    :returns: A list of endpoints with information required to query a primary shard of an index
+    """
+    return [
+        {
+            'shardID': int(shard['shard']),
+            'docCount': int(shard['docs']),
+            'endpoint': shard['ip'],
+            'index': shard['index']
+        } for shard in Elasticsearch(hosts=client, http_auth=auth).cat.shards(index=index, format='json') if shard['prirep'] == 'p' and int(shard['docs']) > 0]
+
+
+def __get_hostname_ips(client_addresses):
+    _result = {}
+    if isinstance(client_addresses, list):
+        for _address in client_addresses:
+            _address = str(_address)
+            _key = _address
+
+            # Replace preposition
+            for _filter in ['https', 'http', '://']:
+                _address = _address.replace(_filter, '')
+
+            # Replace eventual sockets
+            if len(_address.split(':')) > 1:
+                for _tmp in _address.split(':'):
+                    if len(_tmp) > 1:
+                        _address = _tmp
+                        break
+
+            _result[socket.gethostbyname(_address)] = _key
+    return _result
+
+
+def scan_index(index, client, auth=('', ''), query={}, scroll_size=10000, n_partitions=None, timeout='1m', responsetype=HITS):
     """
     Scan a complete index
 
@@ -138,6 +182,7 @@ def scan_index(index, client, auth=('', ''), query={}, scroll_size=10000, n_part
 
     _dataholder = []
     _shards = __get_shard_info(index=index, client=client, auth=auth)
+    _hostname_ips = __get_hostname_ips(client_addresses=client)
 
     if responsetype == HITS:
         for _shard in _shards:
@@ -147,10 +192,7 @@ def scan_index(index, client, auth=('', ''), query={}, scroll_size=10000, n_part
             _tmp_size = _shard['docCount']
             for _sliceidx in range(n_partitions):
                 # set endpoint
-                if use_https:
-                    endpoint = f"https://{_shard['endpoint']}:9200"
-                else:
-                    endpoint = f"http://{_shard['endpoint']}:9200"            
+                endpoint = f"{_hostname_ips[_shard['endpoint']]}"
 
                 if _tmp_size >= scroll_size:
                     # Add slicing to the query
@@ -202,25 +244,3 @@ def scan_index(index, client, auth=('', ''), query={}, scroll_size=10000, n_part
             )
 
     return _dataholder
-
-
-def __get_shard_info(index, client, auth=('', '')):
-    """
-    Request info about the shards used for an index or alias
-
-    :param index: The name of the index or alias
-    :type index: str
-
-    :param client: The endpoint to request info from
-    :type client: str, list
-
-    :rtype: list
-    :returns: A list of endpoints with information required to query a primary shard of an index
-    """
-    return [
-        {
-            'shardID': int(shard['shard']),
-            'docCount': int(shard['docs']),
-            'endpoint': shard['ip'],
-            'index': shard['index']
-        } for shard in Elasticsearch(hosts=client, http_auth=auth).cat.shards(index=index, format='json') if shard['prirep'] == 'p' and int(shard['docs']) > 0]
