@@ -19,11 +19,11 @@ from src.elastic_scan import scan_index
 
 if __name__ == "__main__":
     client = Client() # Create local parallellised session
-    data = scan_index(
-        'index-name-date',
-        'http://elastic_server:9200/'
-    ) # Initialise the scanner
-    data = db.from_delayed(data) # Create a distributed data structure from the index, this structure will be partitioned automatically
+    data = db.from_delayed(scan_index(
+        index='index-name-date',
+        client='http://elastic_server:9200/',
+        http_auth=(USERNAME, PASSWORD)
+    )) # Create a distributed data structure from the index, this structure will be partitioned automatically
     client.rebalance(data) # Make sure data is distributed, required when running a cluster
     print(f'Bag holds {data.npartitions} partitions')
     local_result = data.compute() # Fetch results distributed + load locally

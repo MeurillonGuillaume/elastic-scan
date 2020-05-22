@@ -25,7 +25,7 @@ def __get_npartitions(doc_count, scroll_size):
     return _res
 
 
-def __elastic_scanner(index, client, query={}, scroll_size=10000, timeout='1m', responsetype='hits'):
+def __elastic_scanner(index, client, auth=('', ''), query={}, scroll_size=10000, timeout='1m', responsetype='hits'):
     """
     Create a index scanning thread
 
@@ -47,7 +47,7 @@ def __elastic_scanner(index, client, query={}, scroll_size=10000, timeout='1m', 
     :rtype: Generator
     """
     # Connect to Elasticsearch
-    _es = Elasticsearch(client)
+    _es = Elasticsearch(hosts=client, http_auth=auth)
 
     # Initialise scroll
     if responsetype == HITS:
@@ -63,7 +63,7 @@ def __elastic_scanner(index, client, query={}, scroll_size=10000, timeout='1m', 
             logging.error(e)
 
 
-def __scan(index, client, query={}, scroll_size=10000, timeout='1m', responsetype=HITS):
+def __scan(index, client, auth=('', ''), query={}, scroll_size=10000, timeout='1m', responsetype=HITS):
     """
     Scan an Elasticsearch index
 
@@ -85,7 +85,7 @@ def __scan(index, client, query={}, scroll_size=10000, timeout='1m', responsetyp
     :rtype: list
     """
     # Connect to Elasticsearch
-    _es = Elasticsearch(client)
+    _es = Elasticsearch(hosts=client, http_auth=auth)
     return list(__elastic_scanner(index, client, query=query, scroll_size=scroll_size, timeout='1m', responsetype=responsetype))
 
 
@@ -111,15 +111,18 @@ def __add_slice(query, sliceid, slicemax):
     return query
 
 
-def scan_index(index, client_address, query={}, scroll_size=10000, n_partitions=None, timeout='1m', responsetype=HITS):
+def scan_index(index, client, auth=('', ''), query={}, scroll_size=10000, n_partitions=None, timeout='1m', responsetype=HITS, use_https=True):
     """
     Scan a complete index
 
     :param index: An index to scan
     :type index: str
 
-    :param client_address: A list of addresses or a string
-    :type client_address: list, str
+    :param client: A list of addresses or a string, or Elasticsearch object
+    :type client: [list, str]
+
+    :param auth: A tuple in the form of (USERNAME, PASSWORD)
+    :type auth: tuple
 
     :param query: A query to execute for filtering
     :type query: dict
@@ -134,7 +137,7 @@ def scan_index(index, client_address, query={}, scroll_size=10000, n_partitions=
     """
 
     _dataholder = []
-    _shards = __get_shard_info(index=index, client=client_address)
+    _shards = __get_shard_info(index=index, client=client, auth=auth)
 
     if responsetype == HITS:
         for _shard in _shards:
@@ -143,6 +146,12 @@ def scan_index(index, client_address, query={}, scroll_size=10000, n_partitions=
                 _shard['docCount'], scroll_size)
             _tmp_size = _shard['docCount']
             for _sliceidx in range(n_partitions):
+                # set endpoint
+                if use_https:
+                    endpoint = f"https://{_shard['endpoint']}:9200"
+                else:
+                    endpoint = f"http://{_shard['endpoint']}:9200"            
+
                 if _tmp_size >= scroll_size:
                     # Add slicing to the query
                     _q = __add_slice(query=query,
@@ -151,11 +160,12 @@ def scan_index(index, client_address, query={}, scroll_size=10000, n_partitions=
                     _dataholder.append(
                         delayed(__scan)(
                             index=_shard['index'],
-                            client=f"http://{_shard['endpoint']}:9200",
+                            client=endpoint,
                             query=_q,
                             scroll_size=scroll_size,
                             timeout=timeout,
-                            responsetype=responsetype
+                            responsetype=responsetype,
+                            auth=auth
                         )
                     )
                     _tmp_size -= scroll_size
@@ -167,11 +177,12 @@ def scan_index(index, client_address, query={}, scroll_size=10000, n_partitions=
                     _dataholder.append(
                         delayed(__scan)(
                             index=_shard['index'],
-                            client=f"http://{_shard['endpoint']}:9200",
+                            client=endpoint,
                             query=_q,
                             scroll_size=_tmp_size,
                             timeout=timeout,
-                            responsetype=responsetype
+                            responsetype=responsetype,
+                            auth=auth
                         )
                     )
                     _tmp_size -= _tmp_size
@@ -181,18 +192,19 @@ def scan_index(index, client_address, query={}, scroll_size=10000, n_partitions=
             _dataholder.append(
                 delayed(__scan)(
                     index=_idx,
-                    client=client_address,
+                    client=client,
                     query=query,
                     scroll_size=scroll_size,
                     timeout=timeout,
-                    responsetype=responsetype
+                    responsetype=responsetype,
+                    auth=auth
                 )
             )
 
     return _dataholder
 
 
-def __get_shard_info(index, client):
+def __get_shard_info(index, client, auth=('', '')):
     """
     Request info about the shards used for an index or alias
 
@@ -205,10 +217,10 @@ def __get_shard_info(index, client):
     :rtype: list
     :returns: A list of endpoints with information required to query a primary shard of an index
     """
-    return [{
-        'shardID': int(shard['shard']),
-        'docCount': int(shard['docs']),
-        'endpoint': shard['ip'],
-        'index': shard['index']
-    } for shard in Elasticsearch(client).cat.shards(index=index, format='json')
-        if shard['prirep'] == 'p' and int(shard['docs']) > 0]
+    return [
+        {
+            'shardID': int(shard['shard']),
+            'docCount': int(shard['docs']),
+            'endpoint': shard['ip'],
+            'index': shard['index']
+        } for shard in Elasticsearch(hosts=client, http_auth=auth).cat.shards(index=index, format='json') if shard['prirep'] == 'p' and int(shard['docs']) > 0]
