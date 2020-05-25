@@ -9,5 +9,4 @@ setup(
         'elasticsearch',
         'dask'
     ],
-    include_package_data=True,
 )

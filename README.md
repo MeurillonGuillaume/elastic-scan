@@ -15,7 +15,7 @@ The amount of partitions is either automatically generated, or manually submitte
 ```python
 from dask import bag as db
 from dask.distributed import Client
-from src.elastic_scan import scan_index
+from elastic_scan import scan_index
 
 if __name__ == "__main__":
     client = Client() # Create local parallellised session
