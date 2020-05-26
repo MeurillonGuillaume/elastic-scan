@@ -155,7 +155,7 @@ def __get_hostname_ips(client_addresses):
     return _result
 
 
-def scan_index(index, client, auth=('', ''), query={}, scroll_size=10000, n_partitions=None, timeout='1m', responsetype=HITS, with_delay=True):
+def scan_index(index, client, auth=('', ''), query={}, scroll_size=10000, n_partitions=None, timeout='1m', responsetype=HITS):
     """
     Scan a complete index
 
@@ -199,60 +199,34 @@ def scan_index(index, client, auth=('', ''), query={}, scroll_size=10000, n_part
                     _q = __add_slice(query=query,
                                      sliceid=_sliceidx,
                                      slicemax=n_partitions)
-                    if with_delay:
-                        _dataholder.append(
-                            delayed(__scan)(
-                                index=_shard['index'],
-                                client=endpoint,
-                                query=_q,
-                                scroll_size=scroll_size,
-                                timeout=timeout,
-                                responsetype=responsetype,
-                                auth=auth
-                            )
+                    _dataholder.append(
+                        __scan(
+                            index=_shard['index'],
+                            client=endpoint,
+                            query=_q,
+                            scroll_size=scroll_size,
+                            timeout=timeout,
+                            responsetype=responsetype,
+                            auth=auth
                         )
-                    else:
-                        _dataholder.append(
-                            __scan(
-                                index=_shard['index'],
-                                client=endpoint,
-                                query=_q,
-                                scroll_size=scroll_size,
-                                timeout=timeout,
-                                responsetype=responsetype,
-                                auth=auth
-                            )
-                        )
+                    )
                     _tmp_size -= scroll_size
                 else:
                     # Add slicing to the query
                     _q = __add_slice(query=query,
                                      sliceid=_sliceidx,
                                      slicemax=n_partitions)
-                    if with_delay:
-                        _dataholder.append(
-                            delayed(__scan)(
-                                index=_shard['index'],
-                                client=endpoint,
-                                query=_q,
-                                scroll_size=_tmp_size,
-                                timeout=timeout,
-                                responsetype=responsetype,
-                                auth=auth
-                            )
+                    _dataholder.append(
+                        __scan(
+                            index=_shard['index'],
+                            client=endpoint,
+                            query=_q,
+                            scroll_size=_tmp_size,
+                            timeout=timeout,
+                            responsetype=responsetype,
+                            auth=auth
                         )
-                    else:
-                        _dataholder.append(
-                            __scan(
-                                index=_shard['index'],
-                                client=endpoint,
-                                query=_q,
-                                scroll_size=_tmp_size,
-                                timeout=timeout,
-                                responsetype=responsetype,
-                                auth=auth
-                            )
-                        )
+                    )
                     _tmp_size -= _tmp_size
     elif responsetype == AGGREGATION:
         _unique_indices = list(set([_shard['index'] for _shard in _shards]))
