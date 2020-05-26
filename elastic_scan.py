@@ -64,6 +64,10 @@ def __elastic_scanner(index, client, auth=('', ''), query={}, scroll_size=10000,
             logging.error(e)
 
 
+def __get_doc_count(index, client, auth, query):
+    return Elasticsearch(hosts=client, http_auth=auth).search(index=index, body=query, size=0)['hits']['total']
+
+
 def __scan(index, client, auth=('', ''), query={}, scroll_size=10000, timeout='1m', responsetype=HITS):
     """
     Scan an Elasticsearch index
@@ -181,28 +185,23 @@ def scan_index(index, client, auth=('', ''), query={}, scroll_size=10000, n_part
     """
 
     _dataholder = []
-    _shards = __get_shard_info(index=index, client=client, auth=auth)
     _hostname_ips = __get_hostname_ips(client_addresses=client)
+    _doc_count = __get_doc_count(
+        index=index, client=client, auth=auth, query=query)
 
     if responsetype == HITS:
-        for _shard in _shards:
-            # Count partitions for shard
-            n_partitions = __get_npartitions(
-                _shard['docCount'], scroll_size)
-            _tmp_size = _shard['docCount']
+        # Count partitions for shard
+        n_partitions = __get_npartitions(_doc_count, scroll_size)
+        if n_partitions > 1:
             for _sliceidx in range(n_partitions):
-                # set endpoint
-                endpoint = f"{_hostname_ips[_shard['endpoint']]}"
-
-                if _tmp_size >= scroll_size:
+                if _doc_count >= scroll_size:
                     # Add slicing to the query
-                    _q = __add_slice(query=query,
-                                     sliceid=_sliceidx,
+                    _q = __add_slice(query=query, sliceid=_sliceidx,
                                      slicemax=n_partitions)
                     _dataholder.append(
-                        __scan(
-                            index=_shard['index'],
-                            client=endpoint,
+                        delayed(__scan)(
+                            index=index,
+                            client=client,
                             query=_q,
                             scroll_size=scroll_size,
                             timeout=timeout,
@@ -210,37 +209,46 @@ def scan_index(index, client, auth=('', ''), query={}, scroll_size=10000, n_part
                             auth=auth
                         )
                     )
-                    _tmp_size -= scroll_size
+                    _doc_count -= scroll_size
                 else:
                     # Add slicing to the query
                     _q = __add_slice(query=query,
                                      sliceid=_sliceidx,
                                      slicemax=n_partitions)
                     _dataholder.append(
-                        __scan(
-                            index=_shard['index'],
-                            client=endpoint,
+                        delayed(__scan)(
+                            index=index,
+                            client=client,
                             query=_q,
-                            scroll_size=_tmp_size,
+                            scroll_size=_doc_count,
                             timeout=timeout,
                             responsetype=responsetype,
                             auth=auth
                         )
                     )
-                    _tmp_size -= _tmp_size
-    elif responsetype == AGGREGATION:
-        _unique_indices = list(set([_shard['index'] for _shard in _shards]))
-        for _idx in _unique_indices:
+        else:
             _dataholder.append(
                 delayed(__scan)(
-                    index=_idx,
+                    index=index,
                     client=client,
                     query=query,
-                    scroll_size=scroll_size,
+                    scroll_size=_doc_count,
                     timeout=timeout,
                     responsetype=responsetype,
                     auth=auth
                 )
             )
+    elif responsetype == AGGREGATION:
+        _dataholder.append(
+            delayed(__scan)(
+                index=index,
+                client=client,
+                query=query,
+                scroll_size=scroll_size,
+                timeout=timeout,
+                responsetype=responsetype,
+                auth=auth
+            )
+        )
 
     return _dataholder

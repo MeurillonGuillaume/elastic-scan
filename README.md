@@ -22,7 +22,7 @@ if __name__ == "__main__":
     data = db.from_delayed(scan_index(
         index='index-name-date',
         client='http://elastic_server:9200/',
-        http_auth=(USERNAME, PASSWORD)
+        auth=(USERNAME, PASSWORD)
     )) # Create a distributed data structure from the index, this structure will be partitioned automatically
     client.rebalance(data) # Make sure data is distributed, required when running a cluster
     print(f'Bag holds {data.npartitions} partitions')
