@@ -20,9 +20,16 @@ from elastic_scan import scan_index
 if __name__ == "__main__":
     client = Client() # Create local parallellised session
     data = db.from_delayed(scan_index(
-        index='index-name-date',
-        client='http://elastic_server:9200/',
-        auth=(USERNAME, PASSWORD)
+        index='index-name-date', # Allows wildcards
+        client='http://elastic_server:9200/', # Can be a single endpoint or a list of endpoints
+        auth=(USERNAME, PASSWORD), # Can be used if the cluster requires authentication
+        query={
+        	"query": {
+        		...
+        	}
+        }, # Can be any valid DSL-query
+        scroll_size=10000, # Can be used for smaller/larger scroll threads
+        timeout='1m' # Keepalive of the scroll session, keep as low as possible to avoid overhead
     )) # Create a distributed data structure from the index, this structure will be partitioned automatically
     client.rebalance(data) # Make sure data is distributed, required when running a cluster
     print(f'Bag holds {data.npartitions} partitions')
@@ -32,10 +39,12 @@ if __name__ == "__main__":
 
 ## Execute on cluster
 
-In order to execute the scanner on a cluster-based system, the Elasticsearch-scan package has to be installed on **every worker-node**, as wel the [Elasticsearch package](https://pypi.org/project/elasticsearch/).
+In order to execute the scanner on a cluster-based system, the Elasticsearch-scan package has to be installed on **every worker-node**, as well as the [Elasticsearch package](https://pypi.org/project/elasticsearch/).
 
 ## Result
 
 When using the example above, the result will be a [Bag](https://examples.dask.org/bag.html) (low-level Dask data structure) with as many partitions as has been calculated before fetching the data. The Bag will be lazilly-loaded on the server-side, and partitions will be balanced across all available nodes.
 
 On executing operations on this Bag that has been created, the first thing which will happen is the data will be fetches in parallel. After that, all operations will be executed.
+
+The `scan_index(...)` will return a list of [Delayed](https://docs.dask.org/en/latest/delayed.html) objects. Each Delayed object is an Elasticsearch scroll which can be fetched in parallel, because each scroll uses slicing, so order of processing doesn't matter.

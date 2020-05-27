@@ -136,7 +136,7 @@ def __add_slice(query, sliceid, slicemax):
     return query
 
 
-def scan_index(index, client, auth=('', ''), query={}, scroll_size=10000, n_partitions=None, timeout='1m', responsetype=HITS):
+def scan_index(index, client, auth=('', ''), query={}, scroll_size=10000, timeout='1m', responsetype=HITS):
     """
     Scan a complete index
 
@@ -164,6 +164,11 @@ def scan_index(index, client, auth=('', ''), query={}, scroll_size=10000, n_part
     _doc_count = __get_doc_count(
         index=index, client=client, auth=auth, query=query)
 
+    if scroll_size < 1:
+        scroll_size = 10000
+        logging.warning(
+            f'Logging size can\'t be below 1 doc, reverting to default ({scroll_size})')
+
     if responsetype == HITS:
         # Count partitions for shard
         n_partitions = __get_npartitions(_doc_count, scroll_size)
@@ -185,7 +190,7 @@ def scan_index(index, client, auth=('', ''), query={}, scroll_size=10000, n_part
                         )
                     )
                     _doc_count -= scroll_size
-                else:
+                elif _doc_count > 0:
                     # Add slicing to the query
                     _q = __add_slice(query=query,
                                      sliceid=_sliceidx,
